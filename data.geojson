@@ -1,0 +1,15 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [13.210615596955, 43.703235294736]
+      },
+      "properties": {
+        "name": "WOM Islands"
+      }
+    }
+  ]
+}
