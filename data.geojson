@@ -10,6 +10,16 @@
       "properties": {
         "name": "WOM Islands"
       }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [43.703235294736, 13.210615596955]
+      },
+      "properties": {
+        "name": "WOM Islands"
+      }
     }
   ]
 }
