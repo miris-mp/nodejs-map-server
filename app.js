@@ -65,6 +65,8 @@ if (cluster.isMaster) {
     ];
 
     console.log("BBOXExt: ", bboxExt);
+    let canvas = Canvas.createCanvas(TILE_LENGTH, TILE_LENGTH);
+    let context = canvas.getContext("2d");
 
     // save data of coords
     readGeoJSONFile("./data.geojson")
@@ -74,8 +76,17 @@ if (cluster.isMaster) {
           let lon = feature.geometry.coordinates[0];
           let lat = feature.geometry.coordinates[1];
 
-          let canvas = Canvas.createCanvas(TILE_LENGTH, TILE_LENGTH);
-          let context = canvas.getContext("2d");
+          let bboxPoint = merc.bbox(lon, lat, zoom);
+
+          console.log("Punto ", bboxPoint);
+          if (
+            bboxExt[0] < bboxPoint[0] &&
+            bboxPoint[2] < bboxExt[2] &&
+            bboxExt[1] < bboxPoint[1] &&
+            bboxPoint[3] < bboxExt[3]
+          ) {
+            console.log("Punto dentro");
+          }
           // bbox = min Longitude , min Latitude , max Longitude , max Latitude
           if (
             bboxExt[0] < lon &&
