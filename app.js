@@ -1,65 +1,163 @@
-var zlib = require("zlib");
-const cors = require("cors");
+"use strict";
 
-let app = require("express")();
-var mapnik = require("mapnik");
-let SphericalMercator = require("@mapbox/sphericalmercator");
+let cluster = require("cluster");
 
-app.use(cors());
+if (cluster.isMaster) {
+  const CPUS = require("os").cpus();
 
-var mercator = new SphericalMercator({
-  size: 256, // tile size
-});
+  CPUS.forEach(function () {
+    cluster.fork();
+  });
 
-var geojson_settings = {
-  type: "geojson",
-  file: "./data.geojson",
-};
+  cluster.on("exit", function (worker) {
+    console.log(`worker ${worker.process.pid} died`);
+  });
+} else if (cluster.isWorker) {
+  let Canvas = require("canvas");
+  const cors = require("cors");
+  let app = require("express")();
+  const fs = require("fs/promises");
+  // https://github.com/mapbox/sphericalmercator
+  let SphericalMercator = require("@mapbox/sphericalmercator");
 
-mapnik.register_default_input_plugins();
+  app.use(cors());
 
-app.get("/api/v1/tiles/:zoom/:x/:y/:mark?/:all?", function (req, res) {
-  var options = {
-    x: parseInt(req.params.x),
-    y: parseInt(req.params.y),
-    z: parseInt(req.params.zoom),
-  };
+  // Server port
+  const PORT = process.env.PORT || 8000;
 
-  console.log(req.params);
-  makeVectorTile(options).then(function (vectorTile) {
-    zlib.deflate(vectorTile, function (err, data) {
-      if (err) return res.status(500).send(err.message);
-      res.setHeader("Content-Encoding", "deflate");
-      res.setHeader("Content-Type", "application/x-protobuf");
-      res.send(data);
+  // NOTE: sizes are expressed in number of pixels
+  const TILE_LENGTH = 256;
+  const CIRCLE_RADIUS = 4;
+
+  // hello world get
+  app.get("/", (req, res) => {
+    const responseData = { message: "Hello World!" };
+    res.json(responseData);
+  });
+
+  // api res with points in img
+  app.get("/api/v1/tiles/:zoom/:x/:y/", function (req, res) {
+    //let coords = { x: 45, y: -45 }; // Test
+    //let zoom = 1; // Test
+    let coords = { x: req.params.x, y: req.params.y };
+    let zoom = req.params.zoom;
+
+    let merc = new SphericalMercator({ size: TILE_LENGTH });
+
+    // Check
+    console.log("lon ", coords.x);
+    console.log("lat ", coords.y);
+
+    // let bbox = merc.bbox(13, 42, 10);  // Test
+    let bbox = merc.bbox(coords.x, coords.y, zoom);
+    // bbox default WGS84 = left,bottom,right,top
+    // bbox = min Longitude , min Latitude , max Longitude , max Latitude
+    console.log("BBOX: ", bbox);
+
+    let bboxOffset = 16 / Math.pow(2, zoom);
+
+    // extended bbox
+    let bboxExt = [
+      bbox[0] - bboxOffset, //west
+      bbox[1] - bboxOffset, //south
+      bbox[2] + bboxOffset, //right
+      bbox[3] + bboxOffset, //top
+    ];
+
+    console.log("BBOXExt: ", bboxExt);
+
+    // save data of coords
+    readGeoJSONFile("./data.geojson")
+      .then((geojsonData) => {
+        // loop on the data from geoJSON
+        geojsonData.features.forEach((feature) => {
+          let lon = feature.geometry.coordinates[0];
+          let lat = feature.geometry.coordinates[1];
+
+          let canvas = Canvas.createCanvas(TILE_LENGTH, TILE_LENGTH);
+          let context = canvas.getContext("2d");
+          // bbox = min Longitude , min Latitude , max Longitude , max Latitude
+          if (
+            bboxExt[0] < lon &&
+            lon < bboxExt[2] &&
+            bboxExt[1] < lat &&
+            lat < bboxExt[3]
+          ) {
+            console.log("IL PUNTO APPARTIENE AL RANGE");
+
+            // Convert lon, lat to screen pixel x, y
+            // absolute pixel position of the border box NE and SW vertexes
+            let sw = merc.px([bbox[0], bbox[1]], zoom);
+            let ne = merc.px([bbox[2], bbox[3]], zoom);
+
+            console.log("bbox ", sw, " e ", ne);
+
+            // absolute pixel position of the feature
+            let absPos = merc.px([lon, lat], zoom);
+
+            // position of the point inside the tile
+            let relPos = [absPos[0] - sw[0], absPos[1] - ne[1]];
+
+            context.beginPath();
+            context.fillStyle = "#000";
+
+            console.log(feature);
+
+            context.beginPath();
+            context.fillStyle = "red";
+            // context.arc(10, 10, CIRCLE_RADIUS, 0, Math.PI * 2);  // Test
+            console.log("relative ", relPos);
+            context.arc(
+              relPos[0] / 1000,
+              relPos[1] / 1000,
+              CIRCLE_RADIUS,
+              0,
+              Math.PI * 2
+            );
+            context.closePath();
+            context.fill();
+
+            console.log(
+              "-----------------------------------------------------------------"
+            );
+          }
+        });
+      })
+      .catch((error) => {
+        console.log("Errore ");
+        console.log(error);
+      });
+
+    // CANVAS
+
+    // set the Content-type header
+    res.type("png");
+
+    let stream = canvas.createPNGStream();
+    let chunks = [];
+
+    stream.on("data", function (chunk) {
+      chunks.push(chunk);
+    });
+
+    stream.on("end", function () {
+      let buf = Buffer.concat(chunks);
+      res.send(buf);
     });
   });
-});
 
-function makeVectorTile(options) {
-  var extent = mercator.bbox(options.x, options.y, options.z, false, "3857");
-  console.log("TES ", options);
-  var map = new mapnik.Map(256, 256, "+init=epsg:3857");
-  map.extent = extent;
+  async function readGeoJSONFile(filePath) {
+    let geojsonData;
+    try {
+      const data = await fs.readFile(filePath, { encoding: "utf8" });
+      geojsonData = JSON.parse(data);
+    } catch (err) {
+      geojsonData = "";
+    } finally {
+      return geojsonData;
+    }
+  }
 
-  var layer = new mapnik.Layer("test");
-  layer.datasource = new mapnik.Datasource(geojson_settings);
-  layer.styles = ["default"];
-  map.add_layer(layer);
-
-  return new Promise(function (resolve, reject) {
-    var vtile = new mapnik.VectorTile(
-      parseInt(options.z),
-      parseInt(options.x),
-      parseInt(options.y)
-    );
-    map.render(vtile, function (err, vtile) {
-      if (err) return reject(err);
-      resolve(vtile.getData());
-    });
-  });
+  app.listen(PORT);
+  console.log(`Server running on port ${PORT}`);
 }
-
-app.listen(3000, function () {
-  console.log("Server is running on port 3000");
-});
