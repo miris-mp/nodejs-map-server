@@ -10,11 +10,15 @@
   "license": "ISC",
   "dependencies": {
     "@mapbox/sphericalmercator": "^1.2.0",
+    "@turf/buffer": "^6.5.0",
+    "@turf/collect": "^6.5.0",
+    "@turf/turf": "^6.5.0",
     "canvas": "^2.11.2",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "mapnik": "^4.5.9",
     "nodemon": "^3.0.1",
+    "sharp": "^0.32.6",
     "zlib": "^1.0.5"
   }
 }

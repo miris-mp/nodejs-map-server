@@ -2,6 +2,10 @@
 
 let cluster = require("cluster");
 
+// NOTE: sizes are expressed in number of pixels
+const TILE_LENGTH = 256;
+const CIRCLE_RADIUS = 4;
+
 if (cluster.isMaster) {
   const CPUS = require("os").cpus();
 
@@ -25,10 +29,6 @@ if (cluster.isMaster) {
   // Server port
   const PORT = process.env.PORT || 8000;
 
-  // NOTE: sizes are expressed in number of pixels
-  const TILE_LENGTH = 256;
-  const CIRCLE_RADIUS = 4;
-
   // hello world get
   app.get("/", (req, res) => {
     const responseData = { message: "Hello World!" };
@@ -36,35 +36,39 @@ if (cluster.isMaster) {
   });
 
   // api res with points in img
-  app.get("/api/v1/tiles/:zoom/:x/:y/", function (req, res) {
+  app.get("/api/v1/tiles/:zoom/:lon/:lat/", function (req, res) {
     //let coords = { x: 45, y: -45 }; // Test
-    //let zoom = 1; // Test
-    let coords = { x: req.params.x, y: req.params.y };
-    let zoom = req.params.zoom;
+    let zoom = req.params.zoom; // Test
+
+    let coords = { lon: Number(req.params.lon), lat: Number(req.params.lat) };
+    // const lat = 42; // Example center latitude
+    // const lon = 13; // Example center longitude
+    // let coords = { lon: lon, lat: lat };
+
+    // let zoom = req.params.zoom;
+
+    const [latCent, lonCent] = deg2num(coords.lat, coords.lon, zoom);
 
     let merc = new SphericalMercator({ size: TILE_LENGTH });
-
-    // Check
-    console.log("lon ", coords.x);
-    console.log("lat ", coords.y);
-
     // let bbox = merc.bbox(13, 42, 10);  // Test
-    let bbox = merc.bbox(coords.x, coords.y, zoom);
+    let bbox = merc.bbox(latCent, lonCent, zoom);
+
     // bbox default WGS84 = left,bottom,right,top
     // bbox = min Longitude , min Latitude , max Longitude , max Latitude
-    console.log("BBOX: ", bbox);
 
+    // 16^2 = 256 -> tile
     let bboxOffset = 16 / Math.pow(2, zoom);
+
+    // genera un numero di tile che corrisponde al livello di zoom inserito
 
     // extended bbox
     let bboxExt = [
       bbox[0] - bboxOffset, //west
       bbox[1] - bboxOffset, //south
-      bbox[2] + bboxOffset, //right
-      bbox[3] + bboxOffset, //top
+      bbox[2] + bboxOffset, //east
+      bbox[3] + bboxOffset, //north
     ];
 
-    console.log("BBOXExt: ", bboxExt);
     let canvas = Canvas.createCanvas(TILE_LENGTH, TILE_LENGTH);
     let context = canvas.getContext("2d");
 
@@ -76,25 +80,15 @@ if (cluster.isMaster) {
           let lon = feature.geometry.coordinates[0];
           let lat = feature.geometry.coordinates[1];
 
-          let bboxPoint = merc.bbox(lon, lat, zoom);
-
-          console.log("Punto ", bboxPoint);
-          if (
-            bboxExt[0] < bboxPoint[0] &&
-            bboxPoint[2] < bboxExt[2] &&
-            bboxExt[1] < bboxPoint[1] &&
-            bboxPoint[3] < bboxExt[3]
-          ) {
-            console.log("Punto dentro");
-          }
           // bbox = min Longitude , min Latitude , max Longitude , max Latitude
+          // north & south = lat (-90; +90) - west & east = lon (-180; +180)
           if (
             bboxExt[0] < lon &&
             lon < bboxExt[2] &&
             bboxExt[1] < lat &&
             lat < bboxExt[3]
           ) {
-            console.log("IL PUNTO APPARTIENE AL RANGE");
+            console.log("IL PUNTO APPARTIENE AL RANGE ", bbox);
 
             // Convert lon, lat to screen pixel x, y
             // absolute pixel position of the border box NE and SW vertexes
@@ -118,13 +112,7 @@ if (cluster.isMaster) {
             context.fillStyle = "red";
             // context.arc(10, 10, CIRCLE_RADIUS, 0, Math.PI * 2);  // Test
             console.log("relative ", relPos);
-            context.arc(
-              relPos[0] / 1000,
-              relPos[1] / 1000,
-              CIRCLE_RADIUS,
-              0,
-              Math.PI * 2
-            );
+            context.arc(relPos[0], relPos[1], CIRCLE_RADIUS, 0, Math.PI * 2);
             context.closePath();
             context.fill();
 
@@ -171,4 +159,16 @@ if (cluster.isMaster) {
 
   app.listen(PORT);
   console.log(`Server running on port ${PORT}`);
+}
+
+function deg2num(lat_deg, lon_deg, zoom) {
+  const lat_rad = (lat_deg * Math.PI) / 180;
+  const n = Math.pow(2, zoom);
+  const xtile = Math.floor(((lon_deg + 180) / 360) * n);
+  const ytile = Math.floor(
+    ((1 - Math.asinh(Math.tan(lat_rad)) / Math.PI) / 2) * n
+  );
+
+  console.log("DEG ", xtile, " and ", ytile);
+  return [xtile, ytile];
 }
