@@ -100,6 +100,7 @@ app.get("/image", (req, res) => {
         // Draw a rectangle
         ctx.fillStyle = "green";
 
+        console.log(pxCoords);
         ctx.arc(
           Math.floor(pxCoords.x),
           Math.floor(pxCoords.y),

@@ -32,6 +32,20 @@ if (cluster.isMaster) {
   // hello world get
   app.get("/", (req, res) => {
     const responseData = { message: "Hello World!" };
+    const width = 1200;
+    const height = 620;
+
+    const canvas = Canvas.createCanvas(width, height);
+    const context = canvas.getContext("2d");
+
+    context.fillStyle = "yellow";
+    context.fillRect(0, 0, width, height);
+
+    const buffer = canvas.toBuffer("image/png");
+
+    const fsN = require("fs");
+    fsN.writeFileSync("./image.png", buffer);
+
     res.json(responseData);
   });
 
@@ -41,6 +55,9 @@ if (cluster.isMaster) {
     let zoom = req.params.zoom; // Test
 
     let coords = { lon: Number(req.params.lon), lat: Number(req.params.lat) };
+    // Expected: 13.865771, 42.986211]
+    console.log("*************************************");
+    console.log("Longitude and latitude client: ", coords);
     // const lat = 42; // Example center latitude
     // const lon = 13; // Example center longitude
     // let coords = { lon: lon, lat: lat };
@@ -53,6 +70,7 @@ if (cluster.isMaster) {
     // let bbox = merc.bbox(13, 42, 10);  // Test
     let bbox = merc.bbox(latCent, lonCent, zoom);
 
+    console.log("Bbox calculated ", bbox);
     // bbox default WGS84 = left,bottom,right,top
     // bbox = min Longitude , min Latitude , max Longitude , max Latitude
 
@@ -68,6 +86,7 @@ if (cluster.isMaster) {
       bbox[2] + bboxOffset, //east
       bbox[3] + bboxOffset, //north
     ];
+    console.log("bbox estesa ", bboxExt);
 
     let canvas = Canvas.createCanvas(TILE_LENGTH, TILE_LENGTH);
     let context = canvas.getContext("2d");
@@ -80,6 +99,11 @@ if (cluster.isMaster) {
           let lon = feature.geometry.coordinates[0];
           let lat = feature.geometry.coordinates[1];
 
+          console.log(
+            "Longitutude and latitude of the point to check ",
+            lon,
+            lat
+          );
           // bbox = min Longitude , min Latitude , max Longitude , max Latitude
           // north & south = lat (-90; +90) - west & east = lon (-180; +180)
           if (
@@ -88,61 +112,59 @@ if (cluster.isMaster) {
             bboxExt[1] < lat &&
             lat < bboxExt[3]
           ) {
-            console.log("IL PUNTO APPARTIENE AL RANGE ", bbox);
+            console.log("Data is inside Bbox");
 
-            // Convert lon, lat to screen pixel x, y
-            // absolute pixel position of the border box NE and SW vertexes
-            let sw = merc.px([bbox[0], bbox[1]], zoom);
-            let ne = merc.px([bbox[2], bbox[3]], zoom);
+            const bboxWidth = bboxExt[2] - bboxExt[0]; // Degrees of longitude
+            const bboxHeight = bboxExt[3] - bboxExt[1]; // Degrees of latitude
 
-            console.log("bbox ", sw, " e ", ne);
+            const relativeX = (lon - bboxExt[0]) / bboxWidth;
+            const relativeY = (bboxExt[3] - lat) / bboxHeight;
 
-            // absolute pixel position of the feature
-            let absPos = merc.px([lon, lat], zoom);
+            const tileX = relativeX * 256;
+            const tileY = relativeY * 256;
 
-            // position of the point inside the tile
-            let relPos = [absPos[0] - sw[0], absPos[1] - ne[1]];
-
-            context.beginPath();
-            context.fillStyle = "#000";
-
-            console.log(feature);
+            console.log(
+              "Position in the tile ",
+              Math.floor(tileX),
+              " ",
+              Math.floor(tileY)
+            );
 
             context.beginPath();
             context.fillStyle = "red";
-            // context.arc(10, 10, CIRCLE_RADIUS, 0, Math.PI * 2);  // Test
-            console.log("relative ", relPos);
-            context.arc(relPos[0], relPos[1], CIRCLE_RADIUS, 0, Math.PI * 2);
+            context.arc(tileX, tileY, CIRCLE_RADIUS, 0, Math.PI * 2);
             context.closePath();
             context.fill();
-
             console.log(
               "-----------------------------------------------------------------"
             );
           }
+        });
+        const buffer = canvas.toBuffer("image/png");
+
+        const fsN = require("fs");
+        fsN.writeFileSync("./image.png", buffer);
+
+        // set the Content-type header
+        res.type("png");
+
+        let stream = canvas.createPNGStream();
+        let chunks = [];
+
+        stream.on("data", function (chunk) {
+          chunks.push(chunk);
+        });
+
+        stream.on("end", function () {
+          let buf = Buffer.concat(chunks);
+
+          res.send(buf);
         });
       })
       .catch((error) => {
         console.log("Errore ");
         console.log(error);
       });
-
-    // CANVAS
-
-    // set the Content-type header
-    res.type("png");
-
-    let stream = canvas.createPNGStream();
-    let chunks = [];
-
-    stream.on("data", function (chunk) {
-      chunks.push(chunk);
-    });
-
-    stream.on("end", function () {
-      let buf = Buffer.concat(chunks);
-      res.send(buf);
-    });
   });
 
   async function readGeoJSONFile(filePath) {
@@ -169,6 +191,6 @@ function deg2num(lat_deg, lon_deg, zoom) {
     ((1 - Math.asinh(Math.tan(lat_rad)) / Math.PI) / 2) * n
   );
 
-  console.log("DEG ", xtile, " and ", ytile);
+  console.log("Result deg2num values ", xtile, " and ", ytile);
   return [xtile, ytile];
 }
